@@ -1,4 +1,4 @@
-<Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../FrankConfig.xsd">
+<!--Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../FrankConfig.xsd">
 
 
 	<Adapter name="TrinoQueryAdapter">
@@ -16,4 +16,82 @@
 			</SenderPipe>
 		</Pipeline>
 	</Adapter>
+</Configuration-->
+
+<Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../FrankConfig.xsd">
+    <!-- Memory Database Example (Already Present) -->
+    <Adapter name="TrinoMemoryQueryAdapter">
+        <Receiver name="MemoryReceiver">
+            <ApiListener name="MemoryListener" uriPattern="memory"/>
+        </Receiver>
+        <Pipeline>
+            <SenderPipe name="MemoryPipe">
+                <FixedQuerySender 
+                    name="memory-query-sender" 
+                    queryType="SELECT" 
+                    query="SELECT * FROM memory.test_schema.test_data" 
+					includeFieldDefinition="false"
+                    outputFormat="JSON">
+                </FixedQuerySender>
+            </SenderPipe>
+        </Pipeline>
+    </Adapter>
+
+    <!-- PostgreSQL Example -->
+    <Adapter name="TrinoPgQueryAdapter">
+        <Receiver name="PgReceiver">
+            <ApiListener name="PgListener" uriPattern="postgres"/>
+        </Receiver>
+        <Pipeline>
+            <SenderPipe name="PgPipe">
+                <FixedQuerySender 
+                    name="pg-query-sender" 
+                    queryType="SELECT" 
+                    query="SELECT * FROM postgresql.public.users" 
+					includeFieldDefinition="false"
+                    outputFormat="JSON">
+                </FixedQuerySender>
+            </SenderPipe>
+        </Pipeline>
+    </Adapter>
+
+    <!-- MongoDB Example -->
+    <Adapter name="TrinoMongoQueryAdapter">
+        <Receiver name="MongoReceiver">
+            <ApiListener name="MongoListener" uriPattern="mongodb"/>
+        </Receiver>
+        <Pipeline>
+            <SenderPipe name="MongoPipe">
+                <FixedQuerySender 
+                    name="mongo-query-sender" 
+                    queryType="SELECT" 
+                    query="SELECT * FROM mongodb.test.user_details" 
+                    outputFormat="JSON"
+					includeFieldDefinition="false">
+                </FixedQuerySender>
+            </SenderPipe>
+        </Pipeline>
+    </Adapter>
+
+    <!-- Cross-Database Join Example -->
+    <Adapter name="TrinoJoinQueryAdapter">
+        <Receiver name="JoinReceiver">
+            <ApiListener name="JoinListener" uriPattern="join"/>
+        </Receiver>
+        <Pipeline>
+            <SenderPipe name="JoinPipe">
+                <FixedQuerySender 
+                    name="join-query-sender" 
+                    queryType="SELECT" 
+                    query="SELECT u.name, u.email, ud.details.age, ud.details.address.city 
+                           FROM postgresql.public.users u 
+                           JOIN mongodb.test.user_details ud 
+                           ON u.id = ud.user_id" 
+                    outputFormat="JSON"
+					includeFieldDefinition="false"
+    				>
+                </FixedQuerySender>
+            </SenderPipe>
+        </Pipeline>
+    </Adapter>
 </Configuration>

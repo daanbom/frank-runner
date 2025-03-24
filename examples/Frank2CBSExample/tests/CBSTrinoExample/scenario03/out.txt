@@ -1,0 +1,1 @@
+Performance test completed. See logs for timing comparison.

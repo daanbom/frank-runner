@@ -1,0 +1,1 @@
+Data successfully retrieved from CBS API and stored in Trino

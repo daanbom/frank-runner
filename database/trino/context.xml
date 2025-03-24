@@ -3,7 +3,7 @@
               auth="Container"
               type="javax.sql.DataSource"
               driverClassName="io.trino.jdbc.TrinoDriver"
-              url="jdbc:trino://localhost:8080/catalog/schema"
+              url="jdbc:trino://localhost:8080"
               username="trino"
               password=""
               maxIdle="10"

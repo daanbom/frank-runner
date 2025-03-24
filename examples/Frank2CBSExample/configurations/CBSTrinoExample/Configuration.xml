@@ -1,0 +1,131 @@
+<Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../FrankConfig.xsd">
+    <!-- 1. API to CBS Data Adapter -->
+    <Adapter name="CBSDataFetcher">
+        <Receiver name="CBSDataReceiver">
+            <ApiListener name="CBSDataListener" uriPattern="cbs/fetchData" method="GET"/>
+        </Receiver>
+
+        <Receiver name="FetchCBSDataReceiver">
+            <JavaListener name="testtool-FetchCBSData" serviceName="testtool-FetchCBSData"/>
+        </Receiver>
+
+
+        <Pipeline>
+
+            <Exits>
+                <Exit name="EXIT" state="SUCCESS"/>
+                <Exit name="ERROR_EXIT" state="ERROR"/>
+            </Exits>
+            <EchoPipe name="SetupParameters">
+                <Param name="text" value='{"baseUrl": "https://opendata.cbs.nl/ODataApp/OData/84727NED", "filters": {"Perioden": "startswith(Perioden,&#39;201&#39;) or startswith(Perioden,&#39;202&#39;)", "municipalities": ["GM0888", "GM0986", "GM0988", "GM0971", "GM0981", "GM0994", "GM1729", "GM1883", "GM1903", "GM1954"]}}'/>
+                <Forward name="success" path="FetchCBSData"/>
+            </EchoPipe>
+            
+            <SenderPipe name="FetchCBSData">
+                <HttpSender name="CBSApiSender" url="${baseUrl}/TypedDataSet" methodType="GET">
+                    <Param name="$filter" value="${filters.Perioden}"/>
+                    <Param name="RegioS" value="${municipality}"/>
+                </HttpSender>
+                <Forward name="success" path="ProcessResult"/>
+                <Forward name="exception" path="HandleError"/>
+            </SenderPipe>
+
+            <SenderPipe name="FetchGeslachtMetadata">
+                <HttpSender name="CBSGeslachtSender" methodType="GET" url="${baseUrl}/GeslachtInfoTable"/>
+                <Forward name="success" path="ProcessGeslachtMetadata"/>
+            </SenderPipe>
+
+            <EchoPipe name="ProcessGeslachtMetadata">
+                <Param name="text" value="Processed gender metadata"/>
+                <Forward name="success" path="FetchLeeftijdMetadata"/>
+            </EchoPipe>
+
+            <SenderPipe name="FetchLeeftijdMetadata">
+                <HttpSender name="CBSLeeftijdSender" methodType="GET" url="${baseUrl}/LeeftijdInfoTable"/>
+                <Forward name="success" path="ProcessLeeftijdMetadata"/>
+            </SenderPipe>
+
+            <EchoPipe name="ProcessLeeftijdMetadata">
+                <Param name="text" value="Processed age metadata"/>
+                <Forward name="success" path="SUCCESS"/>
+            </EchoPipe>
+
+            <!-- Process and store the data in Trino -->
+            <XsltPipe name="ProcessResult" styleSheetName="transformCBSData.xsl">
+                <Param name="sessionKey" value="cbsData"/>  
+                <Forward name="success" path="StoreDataInTrino"/>
+            </XsltPipe>
+
+            <SenderPipe name="StoreDataInTrino">
+                <FixedQuerySender name="InsertCBSDataToTrino" queryType="OTHER" query="INSERT INTO memory.test_schema.cbs_data SELECT * FROM UNNEST(?)">
+                    <Param name="1" sessionKey="cbsData"/>
+                </FixedQuerySender>  
+                
+                <Forward name="success" path="SUCCESS"/>
+            </SenderPipe>
+
+            <EchoPipe name="HandleError">
+                <Param name="text" value="Error fetching CBS data"/>
+                <Forward name="success" path="EXIT"/>
+            </EchoPipe>
+
+            <EchoPipe name="SUCCESS">
+                <Param name="text" value="Data successfully retrieved from CBS API and stored in Trino"/>
+                <Forward name="success" path="EXIT"/>
+            </EchoPipe>
+
+
+        </Pipeline>
+
+    </Adapter>
+
+    <!-- 2. Age Pyramid Query Adapter -->
+    <Adapter name="AgePyramidQuery">
+        <Receiver name="AgePyramidReceiver">
+            <ApiListener name="AgePyramidListener" uriPattern="cbs/agePyramid" method="GET"/>
+        </Receiver>
+        <Pipeline>
+            <SenderPipe name="QueryAgePyramidData">
+                <FixedQuerySender name="AgePyramidQuerySender" queryType="OTHER" query="WITH age_data AS (SELECT c.Leeftijd, c.Geslacht, c.RegioS, c.Perioden, c.Bevolking, a.Title as LeeftijdLabel, g.Title as GeslachtLabel FROM memory.test_schema.cbs_data c JOIN memory.test_schema.age_metadata a ON c.Leeftijd = a.Key JOIN memory.test_schema.gender_metadata g ON c.Geslacht = g.Key WHERE c.Leeftijd != 'Totaal' AND c.Geslacht != 'T001038'), latest_year AS (SELECT MAX(Perioden) as MaxPeriod FROM age_data) SELECT LeeftijdLabel, GeslachtLabel, SUM(Bevolking) as Population FROM age_data JOIN latest_year ON 1=1 WHERE Perioden = MaxPeriod GROUP BY LeeftijdLabel, GeslachtLabel ORDER BY LeeftijdLabel, GeslachtLabel" outputFormat="JSON">
+                </FixedQuerySender>
+                <Forward name="success" path="EXIT"/>
+            </SenderPipe>
+        </Pipeline>
+    </Adapter>
+
+    <!-- 3. Performance Testing Adapter -->
+    <Adapter name="PerformanceTest">
+        <Receiver name="PerformanceReceiver">
+            <ApiListener name="PerformanceListener" uriPattern="cbs/performanceTest" method="GET"/>
+        </Receiver>
+        <Pipeline>
+            <XsltPipe name="StartTimer" styleSheetName="xsl/startTimer.xsl">
+                <Forward name="success" path="DirectQueryTest"/>
+            </XsltPipe>
+            <SenderPipe name="DirectQueryTest">
+                <FixedQuerySender name="DirectQuerySender" queryType="SELECT" query="SELECT * FROM memory.test_schema.cbs_data WHERE RegioS IN ('GM0888', 'GM0986') AND Perioden > '2010'" outputFormat="JSON"/>
+                <Forward name="success" path="CheckDirectQueryTime"/>
+            </SenderPipe>
+            <XsltPipe name="CheckDirectQueryTime" styleSheetName="xsl\checkQueryTime.xsl">
+                <Param name="queryType" value="direct"/>
+                <Forward name="success" path="CachedQueryTest"/>
+            </XsltPipe>
+            <SenderPipe name="CachedQueryTest">
+                <FixedQuerySender name="CreateCachedView" queryType="OTHER" query="CREATE OR REPLACE TABLE memory.test_schema.cached_cbs_data AS SELECT * FROM memory.test_schema.cbs_data WHERE RegioS IN ('GM0888', 'GM0986') AND Perioden > '2010'"/>
+                <Forward name="success" path="QueryCachedData"/>
+            </SenderPipe>
+            <SenderPipe name="QueryCachedData">
+                <FixedQuerySender name="CachedQuerySender" queryType="SELECT" query="SELECT * FROM memory.test_schema.cached_cbs_data" outputFormat="JSON"/>
+                <Forward name="success" path="CheckCachedQueryTime"/>
+            </SenderPipe>
+            <XsltPipe name="CheckCachedQueryTime" styleSheetName="xsl\checkQueryTime.xsl">
+                <Param name="queryType" value="cached"/>
+                <Forward name="success" path="CompareResults"/>
+            </XsltPipe>
+            <EchoPipe name="CompareResults">
+                <Param name="text" value="Performance test completed. See logs for timing comparison."/>
+                <Forward name="success" path="EXIT"/>
+            </EchoPipe>
+        </Pipeline>
+    </Adapter>
+</Configuration>
